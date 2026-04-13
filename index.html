@@ -1,0 +1,529 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { BarChart3, Download, RotateCcw, Upload, Users, ArrowRight, CheckCircle2 } from "lucide-react";
+
+const STORAGE_KEY = "bias_vote_site_v1";
+
+const TEXT_PROFILE_A = [
+  "学习能力强，做事认真，能独立解决问题",
+  "有艺术特长，表达清晰，组织能力较好",
+  "和同学合作时比较耐心，也愿意帮助别人",
+];
+
+const TEXT_PROFILE_B = [
+  "完成任务比较慢，需要别人提醒",
+  "才艺表现一般，表达和组织能力普通",
+  "合作时偶尔会分心，稳定性稍弱",
+];
+
+const INITIAL_DATA = {
+  round1: [],
+  round2: [],
+  round3: [],
+};
+
+function clampScore(n) {
+  return Math.max(1, Math.min(10, Number(n) || 1));
+}
+
+function avg(arr, key) {
+  if (!arr.length) return 0;
+  return arr.reduce((sum, item) => sum + Number(item[key] || 0), 0) / arr.length;
+}
+
+function preferenceCounts(arr) {
+  return arr.reduce(
+    (acc, item) => {
+      if (item.a > item.b) acc.a += 1;
+      else if (item.b > item.a) acc.b += 1;
+      else acc.tie += 1;
+      return acc;
+    },
+    { a: 0, b: 0, tie: 0 }
+  );
+}
+
+function loadImage(file, setter) {
+  const reader = new FileReader();
+  reader.onload = () => setter(String(reader.result));
+  reader.readAsDataURL(file);
+}
+
+function saveData(data) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : INITIAL_DATA;
+  } catch {
+    return INITIAL_DATA;
+  }
+}
+
+function ScoreControl({ label, value, onChange }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-sm font-medium text-slate-600">{label}</div>
+        <div className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
+          {value} / 10
+        </div>
+      </div>
+      <input
+        type="range"
+        min="1"
+        max="10"
+        step="1"
+        value={value}
+        onChange={(e) => onChange(clampScore(e.target.value))}
+        className="w-full"
+      />
+      <div className="mt-2 flex justify-between text-xs text-slate-400">
+        <span>1 分</span>
+        <span>5 分</span>
+        <span>10 分</span>
+      </div>
+    </div>
+  );
+}
+
+function CandidateTextCard({ title, points, accent }) {
+  return (
+    <div className={`rounded-3xl border ${accent} bg-white p-5 shadow-sm`}>
+      <div className="mb-3 text-lg font-semibold text-slate-900">{title}</div>
+      <ul className="space-y-2 text-sm leading-6 text-slate-600">
+        {points.map((point, index) => (
+          <li key={index} className="flex gap-2">
+            <span className="mt-1 h-1.5 w-1.5 rounded-full bg-slate-400" />
+            <span>{point}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CandidateImageCard({ title, image, fallbackStyle, subtitle }) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <div className="text-lg font-semibold text-slate-900">{title}</div>
+          <div className="text-sm text-slate-500">{subtitle}</div>
+        </div>
+      </div>
+      <div className="overflow-hidden rounded-3xl border border-slate-100 bg-slate-50">
+        {image ? (
+          <img src={image} alt={title} className="h-72 w-full object-cover" />
+        ) : (
+          <div className={`flex h-72 items-center justify-center ${fallbackStyle}`}>
+            <div className="rounded-full border border-white/30 bg-white/10 px-6 py-3 text-base font-medium text-white backdrop-blur-sm">
+              未上传图片 · 使用示意图
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ title, value, subtitle }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-sm text-slate-500">{title}</div>
+      <div className="mt-1 text-2xl font-bold text-slate-900">{value}</div>
+      <div className="mt-1 text-xs text-slate-400">{subtitle}</div>
+    </div>
+  );
+}
+
+function ResultBar({ label, aValue, bValue }) {
+  const max = Math.max(aValue, bValue, 1);
+  const aPct = (aValue / max) * 100;
+  const bPct = (bValue / max) * 100;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 text-sm font-medium text-slate-700">{label}</div>
+      <div className="space-y-3">
+        <div>
+          <div className="mb-1 flex items-center justify-between text-sm text-slate-600">
+            <span>A</span>
+            <span>{aValue.toFixed(2)}</span>
+          </div>
+          <div className="h-3 rounded-full bg-slate-100">
+            <div className="h-3 rounded-full bg-slate-900" style={{ width: `${aPct}%` }} />
+          </div>
+        </div>
+        <div>
+          <div className="mb-1 flex items-center justify-between text-sm text-slate-600">
+            <span>B</span>
+            <span>{bValue.toFixed(2)}</span>
+          </div>
+          <div className="h-3 rounded-full bg-slate-100">
+            <div className="h-3 rounded-full bg-slate-400" style={{ width: `${bPct}%` }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function VotingBiasExperimentSite() {
+  const [data, setData] = useState(INITIAL_DATA);
+  const [currentRound, setCurrentRound] = useState(1);
+  const [aScore, setAScore] = useState(8);
+  const [bScore, setBScore] = useState(4);
+  const [aImage, setAImage] = useState("");
+  const [bImage, setBImage] = useState("");
+  const [voterName, setVoterName] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    setData(loadData());
+  }, []);
+
+  const stats = useMemo(() => {
+    const r1A = avg(data.round1, "a");
+    const r1B = avg(data.round1, "b");
+    const r2A = avg(data.round2, "a");
+    const r2B = avg(data.round2, "b");
+    const r3A = avg(data.round3, "a");
+    const r3B = avg(data.round3, "b");
+    return {
+      round1: { a: r1A, b: r1B, pref: preferenceCounts(data.round1) },
+      round2: { a: r2A, b: r2B, pref: preferenceCounts(data.round2) },
+      round3: { a: r3A, b: r3B, pref: preferenceCounts(data.round3) },
+      totalVotes: data.round1.length + data.round2.length + data.round3.length,
+      completeSets: Math.min(data.round1.length, data.round2.length, data.round3.length),
+    };
+  }, [data]);
+
+  const interpretation = useMemo(() => {
+    const textLead = stats.round1.a - stats.round1.b;
+    const imageLead = stats.round2.b - stats.round2.a;
+    const mixedLeadA = stats.round3.a - stats.round3.b;
+    const mixedLeadB = stats.round3.b - stats.round3.a;
+
+    if (!data.round1.length && !data.round2.length && !data.round3.length) {
+      return "暂无结果。先完成几轮投票，再看班级整体倾向。";
+    }
+
+    if (textLead > 0.5 && imageLead > 0.5 && mixedLeadB > 0.2) {
+      return "结果显示：同学们在只看文字时更认可 A，但只看图片时更偏向 B；当文字和图片同时出现后，B 仍然占优。这通常说明外貌信息对判断产生了明显影响。";
+    }
+
+    if (textLead > 0.5 && imageLead > 0.5 && mixedLeadA > 0.2) {
+      return "结果显示：同学们会受到外貌吸引，但当完整信息同时出现时，仍更看重 A 的能力与才华。这说明外貌会影响第一印象，但未完全覆盖对能力的判断。";
+    }
+
+    if (Math.abs(textLead) <= 0.5 && Math.abs(imageLead) <= 0.5 && Math.abs(stats.round3.a - stats.round3.b) <= 0.5) {
+      return "三轮评分差距都不大，说明班级在这组材料上没有形成非常明显的偏向。可以继续增加投票人数，观察趋势是否更稳定。";
+    }
+
+    return "结果存在一定差异，说明同学们的评价同时受文字信息与外貌信息影响。讲解时可以重点讨论：我们以为自己在评价能力，实际上会不会也被外貌悄悄带偏？";
+  }, [stats, data]);
+
+  function updateData(next) {
+    setData(next);
+    saveData(next);
+  }
+
+  function submitVote() {
+    const payload = {
+      voter: voterName.trim() || `匿名同学 ${Date.now().toString().slice(-4)}`,
+      a: clampScore(aScore),
+      b: clampScore(bScore),
+      time: new Date().toISOString(),
+    };
+
+    const next = {
+      ...data,
+      [`round${currentRound}`]: [...data[`round${currentRound}`], payload],
+    };
+
+    updateData(next);
+    setSubmitted(true);
+  }
+
+  function nextRound() {
+    setSubmitted(false);
+    setVoterName("");
+    if (currentRound < 3) {
+      setCurrentRound((r) => r + 1);
+      if (currentRound === 1) {
+        setAScore(5);
+        setBScore(7);
+      }
+      if (currentRound === 2) {
+        setAScore(7);
+        setBScore(6);
+      }
+    } else {
+      setCurrentRound(1);
+      setAScore(8);
+      setBScore(4);
+    }
+  }
+
+  function resetAll() {
+    localStorage.removeItem(STORAGE_KEY);
+    setData(INITIAL_DATA);
+    setCurrentRound(1);
+    setAScore(8);
+    setBScore(4);
+    setVoterName("");
+    setSubmitted(false);
+  }
+
+  function exportJson() {
+    const blob = new Blob([JSON.stringify({ data, exportedAt: new Date().toISOString() }, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "vote-results.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const roundTitle = {
+    1: "第一轮：只看文字描述",
+    2: "第二轮：只看图片印象",
+    3: "第三轮：文字 + 图片一起看",
+  }[currentRound];
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <div className="mx-auto max-w-7xl px-4 py-8 md:px-8">
+        <div className="mb-8 grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
+          <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">
+              <Users className="h-4 w-4" />
+              课堂互动投票原型
+            </div>
+            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">能力、才华与外貌评价实验</h1>
+            <p className="mt-4 max-w-3xl text-base leading-7 text-slate-600">
+              这个网站用于课堂展示：先让同学分别依据文字、图片、以及文字加图片进行打分，再对比三轮结果，讨论外貌是否会影响对一个人的整体判断。
+            </p>
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+              使用提醒：建议在讲解结尾进行去偏见说明。这个活动的目的不是强化“看脸”，而是帮助同学意识到：我们口头上说重视能力，真实评分时却可能被外貌悄悄影响。
+            </div>
+          </div>
+
+          <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center gap-2 text-lg font-semibold">
+              <BarChart3 className="h-5 w-5" />
+              控制台
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <MetricCard title="完整投票组数" value={stats.completeSets} subtitle="三轮都完成才算 1 组" />
+              <MetricCard title="已提交总票数" value={stats.totalVotes} subtitle="三轮累计提交数" />
+            </div>
+            <div className="mt-4 grid gap-3">
+              <button
+                onClick={exportJson}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+              >
+                <Download className="h-4 w-4" />
+                导出结果 JSON
+              </button>
+              <button
+                onClick={resetAll}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                <RotateCcw className="h-4 w-4" />
+                清空本机数据
+              </button>
+            </div>
+            <p className="mt-4 text-xs leading-5 text-slate-400">
+              当前版本为前端本地版，数据保存在本浏览器 localStorage 中。适合同一设备演示，或课堂分组轮流投票。
+            </p>
+          </div>
+        </div>
+
+        <div className="mb-8 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+          <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-medium text-slate-500">当前投票环节</div>
+              <h2 className="mt-1 text-2xl font-bold">{roundTitle}</h2>
+            </div>
+            <div className="rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600">
+              第 {currentRound} / 3 轮
+            </div>
+          </div>
+
+          <div className="mb-6 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-700">
+                <Upload className="h-4 w-4" />
+                可选：上传 A / B 的图片用于第 2、3 轮展示
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="rounded-2xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-600">
+                  <div className="mb-2 font-medium">上传 A 的图片</div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="block w-full text-xs"
+                    onChange={(e) => e.target.files?.[0] && loadImage(e.target.files[0], setAImage)}
+                  />
+                </label>
+                <label className="rounded-2xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-600">
+                  <div className="mb-2 font-medium">上传 B 的图片</div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="block w-full text-xs"
+                    onChange={(e) => e.target.files?.[0] && loadImage(e.target.files[0], setBImage)}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+              <div className="mb-3 text-sm font-medium text-slate-700">投票说明</div>
+              <ul className="space-y-2 text-sm leading-6 text-slate-600">
+                <li>• 评分区间为 1 到 10 分，分数越高表示你越认可这个人。</li>
+                <li>• 第 1 轮只看文字，第 2 轮只看图片，第 3 轮同时看两者。</li>
+                <li>• 课堂演示建议让每位同学三轮都打分，再统一查看统计结果。</li>
+              </ul>
+            </div>
+          </div>
+
+          {currentRound === 1 && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <CandidateTextCard title="A 的文字描述" points={TEXT_PROFILE_A} accent="border-slate-900/10" />
+              <CandidateTextCard title="B 的文字描述" points={TEXT_PROFILE_B} accent="border-slate-300" />
+            </div>
+          )}
+
+          {currentRound === 2 && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <CandidateImageCard
+                title="A 的图片"
+                image={aImage}
+                subtitle="只看外貌印象打分"
+                fallbackStyle="bg-gradient-to-br from-slate-600 to-slate-800"
+              />
+              <CandidateImageCard
+                title="B 的图片"
+                image={bImage}
+                subtitle="只看外貌印象打分"
+                fallbackStyle="bg-gradient-to-br from-pink-400 to-fuchsia-600"
+              />
+            </div>
+          )}
+
+          {currentRound === 3 && (
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="space-y-4">
+                <CandidateImageCard
+                  title="A"
+                  image={aImage}
+                  subtitle="文字 + 图片综合呈现"
+                  fallbackStyle="bg-gradient-to-br from-slate-600 to-slate-800"
+                />
+                <CandidateTextCard title="A 的文字描述" points={TEXT_PROFILE_A} accent="border-slate-900/10" />
+              </div>
+              <div className="space-y-4">
+                <CandidateImageCard
+                  title="B"
+                  image={bImage}
+                  subtitle="文字 + 图片综合呈现"
+                  fallbackStyle="bg-gradient-to-br from-pink-400 to-fuchsia-600"
+                />
+                <CandidateTextCard title="B 的文字描述" points={TEXT_PROFILE_B} accent="border-slate-300" />
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1fr_0.9fr]">
+            <ScoreControl label="给 A 打分" value={aScore} onChange={setAScore} />
+            <ScoreControl label="给 B 打分" value={bScore} onChange={setBScore} />
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-3 text-sm font-medium text-slate-600">提交本轮投票</div>
+              <input
+                value={voterName}
+                onChange={(e) => setVoterName(e.target.value)}
+                placeholder="可填写姓名或学号，也可留空匿名"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-0 placeholder:text-slate-400 focus:border-slate-400"
+              />
+              {!submitted ? (
+                <button
+                  onClick={submitVote}
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+                >
+                  提交本轮评分
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={nextRound}
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition hover:opacity-90"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  {currentRound < 3 ? "进入下一轮" : "重新开始下一组投票"}
+                </button>
+              )}
+              <p className="mt-3 text-xs leading-5 text-slate-400">
+                {submitted ? "本轮已提交成功。可以进入下一轮。" : "同一设备可连续进行多组投票，结果会累计。"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
+          <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+            <h3 className="text-2xl font-bold">投票结果看板</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              下面展示的是三轮中 A 与 B 的平均得分。建议在班级投票结束后，先让同学观察差异，再讨论“外貌是否影响了整体判断”。
+            </p>
+            <div className="mt-6 grid gap-4 md:grid-cols-3">
+              <ResultBar label="第一轮：只看文字" aValue={stats.round1.a} bValue={stats.round1.b} />
+              <ResultBar label="第二轮：只看图片" aValue={stats.round2.a} bValue={stats.round2.b} />
+              <ResultBar label="第三轮：图文结合" aValue={stats.round3.a} bValue={stats.round3.b} />
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-3">
+              <MetricCard
+                title="第一轮偏向人数"
+                value={`A ${stats.round1.pref.a} / B ${stats.round1.pref.b}`}
+                subtitle={`平票 ${stats.round1.pref.tie} 人`}
+              />
+              <MetricCard
+                title="第二轮偏向人数"
+                value={`A ${stats.round2.pref.a} / B ${stats.round2.pref.b}`}
+                subtitle={`平票 ${stats.round2.pref.tie} 人`}
+              />
+              <MetricCard
+                title="第三轮偏向人数"
+                value={`A ${stats.round3.pref.a} / B ${stats.round3.pref.b}`}
+                subtitle={`平票 ${stats.round3.pref.tie} 人`}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+            <h3 className="text-2xl font-bold">结果解读</h3>
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm leading-7 text-slate-700">
+              {interpretation}
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
+              <div className="mb-3 text-sm font-semibold text-slate-700">课堂讲解建议</div>
+              <ul className="space-y-2 text-sm leading-6 text-slate-600">
+                <li>1. 先问同学：你在第一轮为什么给 A 更高或更低的分？</li>
+                <li>2. 再问：第二轮里，图片是否改变了你的第一印象？</li>
+                <li>3. 最后追问：第三轮中，你到底是在评价能力，还是也被外貌带偏了？</li>
+                <li>4. 收尾时强调：活动不是为了评判长相，而是为了识别隐性偏见与“光环效应”。</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
